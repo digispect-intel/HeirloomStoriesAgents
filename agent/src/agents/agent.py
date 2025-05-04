@@ -53,7 +53,7 @@ class AgentVoice:
         log.info("Run", agent_input=agent_input)
         # Handle the case when agent_input is None
         if agent_input is None:
-            room_id = "heirloom-stories-hack"  # Default room name
+            room_id = "di-agent-dave-dev"  # Default room name
             log.info(f"Using default room_id: {room_id}")
         else:
             room_id = agent_input.room_id

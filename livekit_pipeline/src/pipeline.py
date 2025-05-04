@@ -1,6 +1,8 @@
 import json
 import logging
 import os
+import httpx
+import asyncio
 
 from dotenv import load_dotenv
 from livekit.agents import (
@@ -86,27 +88,55 @@ async def entrypoint(ctx: JobContext) -> None:
     logger.info("Connecting to room: %s", ctx.room.name)
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
+    # Modify the event handler to be synchronous and create an async task inside it
+    @ctx.room.on("participant_connected")
+    def on_participant_connected(participant):
+        logger.info("Participant connected: %s", participant.identity)
+        
+        # Skip if this is the agent or a system participant
+        if (participant.identity.startswith("agent-") or 
+            participant.identity == "transcript-listener"):
+            return
+        
+        # If this is a user, send a welcome message
+        logger.info("User participant detected: %s", participant.identity)
+        
+        # Create an async task to handle the welcome message
+        asyncio.create_task(handle_new_participant(participant, session))
+
+    async def handle_new_participant(participant, session):
+        """Handle a new participant connection asynchronously."""
+        # Wait a moment for connection to stabilize
+        await asyncio.sleep(2)
+        
+        # Generate and send welcome message
+        await send_welcome_message(session)
+
+    async def send_welcome_message(session):
+        """Send a welcome message using the agent session."""
+        logger.info("Sending welcome message")
+        
+        try:
+            # Use the session's say method to generate and speak a message
+            session.say(
+                "Welcome to HeirloomStories! I'm your AI assistant. How can I help you today?"
+            )
+        except Exception as e:
+            logger.error("Error sending welcome message: %s", e)
+
     # Wait for the first participant to connect
     participant = await ctx.wait_for_participant()
     logger.info("Starting voice assistant for participant: %s", participant.identity)
 
     # Create an Agent with instructions
     agent = Agent(
-        instructions="You are HeirloomStories AI, a helpful assistant that engages in conversation with users. Be friendly, responsive, and helpful. Your purpose is to assist users with their questions and engage in natural conversation.",
+        instructions="You are HeirloomStories AI, a helpful AI voice assistant that engages in conversation with users. Be friendly, responsive, and helpful. Your purpose is to assist users with their questions and engage in natural conversation.",
         llm=openai.LLM(
             api_key=f"{agent_id}-livekit",
             base_url=agent_url,
             timeout=60.0,
         ),
-        # llm=openai.LLM(
-        #     api_key=f"{agent_id}-livekit",
-        #     base_url=agent_url,
-        #     retry_options=LLMRetryOptions(
-        #         max_retries=5,  # Increase from default 4
-        #         initial_backoff=1.0,  # Start with 1 second
-        #         max_backoff=30.0,  # Maximum 30 seconds between retries
-        #     )
-        # ),
+
     )
 
     # Create an AgentSession with the components
@@ -118,6 +148,38 @@ async def entrypoint(ctx: JobContext) -> None:
 
     # Start the session with the agent and room
     await session.start(agent, room=ctx.room)
+
+    # Send welcome message if this is the first user
+    if not participant.identity.startswith("agent-"):
+        await send_welcome_message(session)
+    
+
+async def send_transcript_to_app(speaker, text):
+    """Send transcript to the FastHTML app."""
+    # Get the app URL from environment variable, with a default fallback
+    app_url = os.environ.get("FASTHTML_APP_URL", "http://localhost:5001")
+    
+    print(f"[PIPELINE] Sending transcript to {app_url}/api/transcript")
+    print(f"[PIPELINE] Speaker: {speaker}, Text: {text}")
+    
+    try:
+        # Send HTTP POST request to your FastHTML app
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{app_url}/api/transcript",
+                json={
+                    "speaker": speaker,
+                    "text": text
+                },
+                timeout=10.0  # Add a timeout to avoid hanging
+            )
+            
+            print(f"[PIPELINE] Response status: {response.status_code}")
+            print(f"[PIPELINE] Response body: {response.text}")
+            
+    except Exception as e:
+        print(f"[PIPELINE] Error sending transcript to app: {e}")
+
 
 if __name__ == "__main__":
     cli.run_app(

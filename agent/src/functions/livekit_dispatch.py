@@ -15,7 +15,7 @@ class LivekitDispatchInput:
 async def livekit_dispatch(function_input: LivekitDispatchInput) -> AgentDispatch:
     try:
         lkapi = api.LiveKitAPI(
-            url=os.getenv("LIVEKIT_API_URL"),
+            url=os.getenv("LIVEKIT_URL"),
             api_key=os.getenv("LIVEKIT_API_KEY"),
             api_secret=os.getenv("LIVEKIT_API_SECRET"),
         )
